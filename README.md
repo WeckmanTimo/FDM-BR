@@ -6,7 +6,7 @@ Install the modules with
 
 python setup.py install
 
-Archived calculations (in the .npz-files) can be analyzed by running the compute*.py-files.
+Archived calculations (the .npz-files in the .zip-files) can be analyzed by running the compute*.py-files.
 
 ## FDM-BR
 FDM procedure uses Becke-Roussel exchange-hole approximation and approximates the pair-density mediated terms (Di, Pij) using the Becke--Roussel exchange-hole. 
