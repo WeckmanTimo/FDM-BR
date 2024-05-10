@@ -8,13 +8,13 @@ python setup.py install
 
 Archived calculations (in the .npz-files) can be analyzed by running the compute*.py-files.
 
-# FDM-BR
+## FDM-BR
 FDM procedure uses Becke-Roussel exchange-hole approximation and approximates the pair-density mediated terms (Di, Pij) using the Becke--Roussel exchange-hole. 
 Run a Becke-Roussel exchange hole calculation with
 
 python calculate_BR.py 2 He 0 0
 
-# FDM-K
+## FDM-K
 
 Exchange-correction to the FDM procedure introduces an exchange correction to when using the Hartree--Fock pair-density. 
 
