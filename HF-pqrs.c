@@ -1,8 +1,6 @@
 #include <Python.h>
 #include <numpy/arrayobject.h>
-#include <arb.h>
-#include <arb_hypgeom.h>
-#include <mag.h>
+#include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -84,11 +82,8 @@
 // Forward function declaration
 static PyObject * FDM_integrals(PyObject *self, PyObject *args);
 
-static PyObject * Kcart_integral(PyObject *self, PyObject *args);
-
 static PyMethodDef FDMMethods[] = {
     {"HFpqrs", FDM_integrals, METH_VARARGS, "Python C API for computing FDM dispersion interaction integrals"},
-	{"Kcart", Kcart_integral, METH_VARARGS, "Python C API for computing multipole moments of the exchange correction for the FDM model"},
     {NULL, NULL, 0, NULL}
 };
 
@@ -101,7 +96,7 @@ static struct PyModuleDef FDMmodule = {
 };
 
 PyMODINIT_FUNC PyInit_HFpqrs(void) {
-    import_array();
+    import_array(); // Required for NumPy
     return PyModule_Create(&FDMmodule);
 }
 
@@ -132,19 +127,19 @@ static PyObject * FDM_integrals(PyObject *self, PyObject *args){
   PyArrayObject * py_results;
 
   if (!PyArg_ParseTuple(args, "O!O!O!O!O!O!O!O!O!O!O!O!O!",
-    &PyArray_Type, &py_gl, // A nonlinear radial grid of type Gauss-Legendre or Gauss-Laguerre, dimensions (M,)
-    &PyArray_Type, &py_glw, // Weights for the radial grid, dimensions (M,)
-    &PyArray_Type, &py_leb, // Lebedev-Laikov grid, dimensions (N,2) where phi on axis=0 and theta on axis=1
-    &PyArray_Type, &py_lebw, // Weights for the Lebedev-Laikov grid, dimensions (N,)
-    &PyArray_Type, &py_psi, // Atomic orbitals on a grid, dimensions (N*M,Q), where Q is the number of atomic orbitals
-    &PyArray_Type, &py_rdm1a, // 1-electron reduced density matrix of spin-A, dimensions (Q,Q)
-    &PyArray_Type, &py_rdm1b, // 1-electron reduced density matrix of spin-B, dimensions (Q,Q)
-    &PyArray_Type, &py_gamma, // 2-electron reduced density matrix, dimensions (Q,Q,Q,Q)
-    &PyArray_Type, &py_rhoa, // Spherically averaged spin-density of spin-A on the same grid as py_gl, (M,)
-    &PyArray_Type, &py_rhob, // Spherically averaged spin-density of spin-B on the same grid as py_gl, (M,)
-    &PyArray_Type, &py_bopt1, // bi-function, given as a list of polynomial coefficients
-    &PyArray_Type, &py_bopt2, // bj-function
-    &PyArray_Type, &py_results // A matrix to return the results
+    &PyArray_Type, &py_gl,
+    &PyArray_Type, &py_glw,
+    &PyArray_Type, &py_leb,
+    &PyArray_Type, &py_lebw,
+    &PyArray_Type, &py_psi,
+    &PyArray_Type, &py_rdm1a,
+    &PyArray_Type, &py_rdm1b,
+    &PyArray_Type, &py_gamma,
+    &PyArray_Type, &py_rhoa,
+    &PyArray_Type, &py_rhob,
+    &PyArray_Type, &py_bopt1,
+    &PyArray_Type, &py_bopt2,
+    &PyArray_Type, &py_results
     )){return NULL;}
 
   double * bopt1 = (double *) malloc((grid_shape(0)) * sizeof(double ));
@@ -165,6 +160,7 @@ static PyObject * FDM_integrals(PyObject *self, PyObject *args){
       nablabopt2[i] += bopt2_fit(j) * (j * pow(grid(i), j-1) );
     }
   }
+
   double r1sq, r2sq;
   double di, tauij, Sij, Pij, Di, Kcorrect, Kinteg;
   di = tauij = Sij = Pij = Di = Kcorrect = 0.;
@@ -181,14 +177,14 @@ static PyObject * FDM_integrals(PyObject *self, PyObject *args){
           u = sqrt(r1sq + r2sq - 2 * sqrt(r1sq*r2sq) * (sin(lebedev(k,1)) * sin(lebedev(l,1)) * cos(lebedev(k,0) - lebedev(l,0)) + cos(lebedev(k,1)) * cos(lebedev(l,1))) );
           for(p=0; p< (int) rdm1a_shape(0); p++){
             for(q=0; q< (int) rdm1b_shape(0); q++){
-              for(r=0; r< (int) rdm1a_shape(1); r++){
-                for(s=0; s< (int) rdm1b_shape(1); s++){
+              for(r=0; r< (int) rdm1a_shape(1); r++){ // r=p
+                for(s=0; s< (int) rdm1b_shape(1); s++){ // s=q
                   // 2-RDM integral for Pij and Di
                   integ = gamma(p,r,q,s) * psi(i*lebedev_shape(0) + k,p) * psi(i*lebedev_shape(0) + k,r) * psi(j*lebedev_shape(0) + l,q) * psi(j*lebedev_shape(0) + l,s) * r1sq * r2sq * grid_weights(i) * grid_weights(j) * cos(lebedev(k,1)) * cos(lebedev(l,1));
                   Pij += integ * bopt1[i] * bopt2[j] * lebedev_weights(k) * lebedev_weights(l) * pow(4*pi,2);
                   Di += integ * grid(i) * bopt2[j]* lebedev_weights(k) * lebedev_weights(l) * pow(4*pi,2);
                   // K-correction integral with AO
-                  if(u>1e-16){Kinteg = (rdm1a(p,q)*rdm1a(r,s) + rdm1b(p,q)*rdm1b(r,s)) * Kintegral(psi(i*lebedev_shape(0) + k,p), psi(i*lebedev_shape(0) + k,r), psi(j*lebedev_shape(0) + l,q), psi(j*lebedev_shape(0) + l,s), bopt1[i]*cos(lebedev(k,1)), bopt2[i]*cos(lebedev(k,1)), bopt1[j]*cos(lebedev(l,1)), bopt2[j]*cos(lebedev(l,1)), u) * r1sq * r2sq * grid_weights(i) * grid_weights(j) * lebedev_weights(k) * lebedev_weights(l) * pow(4*pi,2); Kcorrect += Kinteg;}
+                  if(u>1e-12){Kinteg = (rdm1a(p,q)*rdm1a(r,s) + rdm1b(p,q)*rdm1b(r,s)) * Kintegral(psi(i*lebedev_shape(0) + k,p), psi(i*lebedev_shape(0) + k,r), psi(j*lebedev_shape(0) + l,q), psi(j*lebedev_shape(0) + l,s), bopt1[i]*cos(lebedev(k,1)), bopt2[i]*cos(lebedev(k,1)), bopt1[j]*cos(lebedev(l,1)), bopt2[j]*cos(lebedev(l,1)), u) * r1sq * r2sq * grid_weights(i) * grid_weights(j) * lebedev_weights(k) * lebedev_weights(l) * pow(4*pi,2); Kcorrect += Kinteg;}
                 }
               }
             }
@@ -204,60 +200,4 @@ static PyObject * FDM_integrals(PyObject *self, PyObject *args){
   results(4) = Di;
   results(5) = Kcorrect;
   return  PyFloat_FromDouble(Pij);
-}
-
-static PyObject * Kcart_integral(PyObject *self, PyObject *args){
-  int i,j,p,q,r,s;
-  double integ, Kinteg, u;
-  double s1, t1, u1, s2, t2, u2;
-  double bi1, bk1, bi2, bk2;
-  s1 = t1 = u1 = s2 = t2 = u2 = 0;
-
-  PyArrayObject * py_cart_gl;
-  PyArrayObject * py_cart_glw;
-  PyArrayObject * py_psi;
-  PyArrayObject * py_rdm1a;
-  PyArrayObject * py_rdm1b;
-
-  if (!PyArg_ParseTuple(args, "O!O!O!O!O!dddddd",
-    &PyArray_Type, &py_cart_gl,
-    &PyArray_Type, &py_cart_glw,
-    &PyArray_Type, &py_psi,
-    &PyArray_Type, &py_rdm1a,
-    &PyArray_Type, &py_rdm1b,
-    &s1, &t1, &u1, &s2, &t2, &u2
-    )){return NULL;}
-
-  double r1sq, r2sq;
-  Kinteg = 0;
-  #pragma omp parallel for default(shared) private(p,q,r,s,i,j,bi1,bk1,bi2,bk2,r1sq,r2sq,u,integ) reduction(+: Kinteg)
-  for (i=0; i< (int) cart_grid_shape(0);i++){
-    for (j=0; j<cart_grid_shape(0);j++){
-      u = sqrt(fabs(pow(cart_grid(i,0)-cart_grid(j,0),2) + pow(cart_grid(i,1)-cart_grid(j,1),2) + pow(cart_grid(i,2)-cart_grid(j,2),2) ));
-      if(u>1e-7){
-        r1sq = pow(cart_grid(i,0), 2) + pow(cart_grid(i,1), 2) + pow(cart_grid(i,2), 2);
-        r2sq = pow(cart_grid(j,0), 2) + pow(cart_grid(j,1), 2) + pow(cart_grid(j,2), 2);
-        bi1 = pow(cart_grid(i,0),s1) * pow(cart_grid(i,1),t1) * pow(cart_grid(i,2),u1); // monomial b-functions
-        bk1 = pow(cart_grid(i,0),s2) * pow(cart_grid(i,1),t2) * pow(cart_grid(i,2),u2);
-        bi2 = pow(cart_grid(j,0),s1) * pow(cart_grid(j,1),t1) * pow(cart_grid(j,2),u1);
-        bk2 = pow(cart_grid(j,0),s2) * pow(cart_grid(j,1),t2) * pow(cart_grid(j,2),u2);
-        for(p=0; p< (int) rdm1a_shape(0); p++){
-          for(q=0; q< (int) rdm1a_shape(1); q++){
-            for(r=p; r< (int) rdm1b_shape(0); r++){
-              for(s=q; s< (int) rdm1b_shape(1); s++){
-                if((rdm1a(p,q) > 1e-2 && rdm1a(r,s) > 1e-2)||(rdm1b(p,q) > 1e-2 && rdm1b(r,s) > 1e-2)){
-                  integ = (rdm1a(p,q)*rdm1a(r,s) + rdm1b(p,q)*rdm1b(r,s)) * Kintegral(psi(i,p), psi(i,r), psi(j,q), psi(j,s), bi1, bk1, bi2, bk2, u) * r1sq * r2sq * cart_grid_weights(i) * cart_grid_weights(j) * pow(4*pi,2);
-                  Kinteg += integ;
-                  if(p!=r){Kinteg += integ;}
-                  if(q!=s){Kinteg += integ;}
-                  if(p!=r && q!=s){Kinteg += integ;}
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  return  PyFloat_FromDouble(Kinteg);
 }
