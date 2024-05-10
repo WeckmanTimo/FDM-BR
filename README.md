@@ -6,7 +6,7 @@ Install the modules with
 
 python setup.py install
 
-Archived calculations (the .npz-files in the .zip-files) can be analyzed by running the compute*.py-files.
+Archived calculations (the .npz-files in the .zip-files) can be analyzed by running the compute*.py-files. Extract the archives in a folder and run a compute*.py-file. The compute_br/exchange.py scripts print out the C6 coefficient of each atom with respect to the size of the monomial basis, while the compute_mixed*.py files print out the C6 coefficients for all the atom pairs in the highest monomial basis.
 
 ## FDM-BR
 FDM procedure uses Becke-Roussel exchange-hole approximation and approximates the pair-density mediated terms (Di, Pij) using the Becke--Roussel exchange-hole. 
